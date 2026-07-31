@@ -1,0 +1,25 @@
+# WAL test files
+test.log
+wal.log
+wal.log.tmp
+*.log
+*.log.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
