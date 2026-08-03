@@ -70,6 +70,58 @@ class SSTable:
             value = f.read(value_len)
 
             return value
+        
+    def iter_entries(self, path: str):
+        with open(path, "rb") as f:
+            # footer
+            f.seek(-(8 + 4), 2)
+            index_offset = struct.unpack("<Q", f.read(8))[0]
+            num_entries  = struct.unpack("<I", f.read(4))[0]
+
+            # load index
+            f.seek(index_offset)
+            index = []
+            for _ in range(num_entries):
+                key_len = struct.unpack("<I", f.read(4))[0]
+                key     = f.read(key_len).decode()
+                offset  = struct.unpack("<Q", f.read(8))[0]
+                index.append((key, offset))
+
+            # yield entries directly using offsets
+            for key, offset in index:
+                f.seek(offset)
+                key_len   = struct.unpack("<I", f.read(4))[0]
+                f.read(key_len)   # skip key
+                value_len = struct.unpack("<I", f.read(4))[0]
+                value     = f.read(value_len)
+                yield key, value
+
+    def write_from_iter(self, entries, path: str) -> None:
+        index = []
+
+        with open(path, "wb") as f:
+            for key, value in entries:
+                offset    = f.tell()
+                key_bytes = key.encode()
+                value_bytes = value if isinstance(value, bytes) else value.encode()
+
+                f.write(struct.pack("<I", len(key_bytes)))
+                f.write(key_bytes)
+                f.write(struct.pack("<I", len(value_bytes)))
+                f.write(value_bytes)
+
+                index.append((key, offset))
+
+            index_offset = f.tell()
+
+            for key, offset in index:
+                key_bytes = key.encode()
+                f.write(struct.pack("<I", len(key_bytes)))
+                f.write(key_bytes)
+                f.write(struct.pack("<Q", offset))
+
+            f.write(struct.pack("<Q", index_offset))
+            f.write(struct.pack("<I", len(index)))
 
 
 if __name__ == "__main__":
