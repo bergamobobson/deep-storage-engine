@@ -111,6 +111,41 @@ class Node:
 
         return True
 
+    def check_log_consistency(self, prev_log_index: int, prev_log_term: int) -> bool:
+        """
+        Verify the follower's log agrees with the leader's log up to
+        prev_log_index, before accepting any new entries.
+
+        This is Raft's log matching property in action: if the entry at
+        prev_log_index has the same term on both leader and follower, then
+        every entry before it is guaranteed identical too. Checking a single
+        position is enough to confirm the entire prefix matches.
+
+        Three cases:
+            1. prev_log_index == 0 → no previous entry to check, this is
+            the very first entry ever sent. Always consistent.
+            2. prev_log_index > len(self.state.log) → I don't even have an
+            entry at that position yet. Reject — I'm missing entries.
+            3. my entry at prev_log_index has a different term → my log
+            diverged from the leader's at some point in the past
+            (e.g. a different, now-stale leader wrote something there).
+            Reject — the leader must back up and resend from an earlier point.
+
+        Returns:
+            True if it is safe to append the leader's new entries after
+            prev_log_index, False otherwise.
+        """
+        if prev_log_index == 0:
+            return True
+
+        if prev_log_index > len(self.state.log):
+            return False
+
+        if self.state.log[prev_log_index - 1].term != prev_log_term:
+            return False
+
+        return True
+
 if __name__ == "__main__":
     n1 = Node("node1", peers=["node2", "node3"], state_path="node1_state.json")
 
@@ -121,3 +156,17 @@ if __name__ == "__main__":
 
     granted2 = n1.grant_vote("node3", candidate_term=1, last_log_term=0, last_log_index=0)
     print(granted2)                   # → False
+
+    n1 = Node("node1", peers=[], state_path="node1_state.json")
+
+    from raft.state import LogEntry
+    n1.state.log = [
+        LogEntry(1, 1, {"op": "put", "key": "a", "value": "1"}),
+        LogEntry(2, 1, {"op": "put", "key": "b", "value": "2"}),
+        LogEntry(3, 2, {"op": "put", "key": "c", "value": "3"}),
+    ]
+
+    print(n1.check_log_consistency(0, 0))   # → True  (no previous entry)
+    print(n1.check_log_consistency(3, 2))   # → True  (entry 3 has term 2, matches)
+    print(n1.check_log_consistency(3, 1))   # → False (entry 3 has term 2, not 1)
+    print(n1.check_log_consistency(5, 2))   # → False (I don't have entry 5)
