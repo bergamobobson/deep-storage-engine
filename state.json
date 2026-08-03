@@ -1,0 +1,1 @@
+{"current_term": 1, "voted_for": "node2", "log": [{"index": 1, "term": 1, "command": {"action": "set", "key": "x", "value": 42}}]}
