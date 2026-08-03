@@ -1,1 +1,1 @@
-{"current_term": 1, "voted_for": "node2", "log": []}
+{"current_term": 1, "voted_for": null, "log": [{"index": 1, "term": 1, "command": {"op": "put", "key": "a", "value": "1"}}]}

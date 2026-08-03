@@ -34,6 +34,7 @@ class Node:
         self.timeout    = 0                # randomized election timeout
         self.state_path = state_path
         self.state      = NodeState(node_id)
+        self.commit_index = 0   # ← ajoute cette ligne
 
         # --- leader-only volatile state ---
         # next_index  : per peer, the next log entry the leader THINKS
@@ -146,6 +147,74 @@ class Node:
 
         return True
 
+    def append_entries(self, leader_id: str, leader_term: int,
+                    prev_log_index: int, prev_log_term: int,
+                    entries: list, leader_commit: int) -> bool:
+        """
+        Handle an incoming AppendEntries RPC from the leader.
+
+        Used both for actual log replication (entries non-empty) and for
+        heartbeats (entries empty) — a heartbeat is just an AppendEntries
+        with nothing new to add, sent periodically so followers know the
+        leader is still alive and don't start an election.
+
+        Steps, in order:
+            1. reject stale leader — if leader_term < my current_term,
+            this message is from an outdated leader, ignore it.
+            2. accept the leader — update current_term if the leader's
+            term is newer, and step down to FOLLOWER (a candidate or
+            even a leader must yield once it sees a higher term).
+            3. check log consistency at prev_log_index / prev_log_term —
+            if it doesn't match, reject so the leader backs up and
+            retries with an earlier prev_log_index.
+            4. append the new entries — any conflicting entry already
+            present at the same index is overwritten (the leader's
+            version always wins once consistency is confirmed).
+            5. advance commit_index — I can safely consider an entry
+            committed once the leader tells me it is, but never beyond
+            what I actually have in my own log.
+            6. persist state to disk before returning True — same
+            durability rule as grant_vote: never acknowledge something
+            that isn't safely on disk yet.
+
+        Returns:
+            True if the entries were accepted, False otherwise.
+        """
+        # 1. reject a stale leader
+        if leader_term < self.state.current_term:
+            return False
+
+        # 2. a real leader exists at this term (or later) — step down
+        if leader_term >= self.state.current_term:
+            self.state.current_term = leader_term
+            self.role = Role.FOLLOWER
+
+        # 3. verify the log agrees with the leader up to prev_log_index
+        if not self.check_log_consistency(prev_log_index, prev_log_term):
+            return False
+
+        # 4. append new entries, overwriting any conflicting ones
+        #    prev_log_index is 1-based; entries start right after it
+        insert_at = prev_log_index  # 0-based position in self.state.log
+        for offset, entry in enumerate(entries):
+            position = insert_at + offset
+            if position < len(self.state.log):
+                # overwrite if there's a conflict, otherwise leave as-is
+                if self.state.log[position].term != entry.term:
+                    self.state.log = self.state.log[:position]
+                    self.state.log.append(entry)
+            else:
+                self.state.log.append(entry)
+
+        # 5. advance commit_index, never past what I actually have
+        if leader_commit > self.commit_index:
+            self.commit_index = min(leader_commit, len(self.state.log))
+
+        # 6. persist before acknowledging
+        self.state.save(self.state_path)
+
+        return True
+
 if __name__ == "__main__":
     n1 = Node("node1", peers=["node2", "node3"], state_path="node1_state.json")
 
@@ -170,3 +239,21 @@ if __name__ == "__main__":
     print(n1.check_log_consistency(3, 2))   # → True  (entry 3 has term 2, matches)
     print(n1.check_log_consistency(3, 1))   # → False (entry 3 has term 2, not 1)
     print(n1.check_log_consistency(5, 2))   # → False (I don't have entry 5)
+
+
+    n1 = Node("node1", peers=[], state_path="node1_state.json")
+
+    from raft.state import LogEntry
+
+    ok = n1.append_entries(
+        leader_id="node2",
+        leader_term=1,
+        prev_log_index=0,
+        prev_log_term=0,
+        entries=[LogEntry(1, 1, {"op": "put", "key": "a", "value": "1"})],
+        leader_commit=1
+    )
+    print(ok)                          # → True
+    print(len(n1.state.log))           # → 1
+    print(n1.commit_index)             # → 1
+    print(n1.state.current_term)       # → 1
