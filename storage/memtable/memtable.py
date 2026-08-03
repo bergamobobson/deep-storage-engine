@@ -42,17 +42,18 @@ class Memtable:
         for key, value in self.skiplist:
             yield key, value
 
-# 1. write some data
-m = Memtable("wal.log", size_limit=1024*1024)
-m.put("apple", b"100")
-m.put("banana", b"200")
-m.put("cherry", b"300")
+if __name__ == "__main__":
+    # 1. write some data
+    m = Memtable("wal.log", size_limit=1024*1024)
+    m.put("apple", b"100")
+    m.put("banana", b"200")
+    m.put("cherry", b"300")
 
-print(m.get("banana"))   # → b"200"
+    print(m.get("banana"))   # → b"200"
 
-# 2. simulate crash — create a new Memtable from same WAL
-m2 = Memtable("wal.log", size_limit=1024*1024)
-print(m2.get("banana"))  # → None  (SkipList is empty)
+    # 2. simulate crash — create a new Memtable from same WAL
+    m2 = Memtable("wal.log", size_limit=1024*1024)
+    print(m2.get("banana"))  # → None  (SkipList is empty)
 
-m2.recover()
-print(m2.get("banana"))  # → b"200"  (rebuilt from WAL)
+    m2.recover()
+    print(m2.get("banana"))  # → b"200"  (rebuilt from WAL)
